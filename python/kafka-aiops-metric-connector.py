@@ -391,9 +391,17 @@ def kafkaReader():
                 continue
             elif not msg.error():
                if sevOneKafkaDataFormat.lower() == "avro":
-                  metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                  try:
+                     metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                  except Exception as error:
+                     logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
+                     logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
                else:
-                  metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                  try:
+                     metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                  except Exception as error:
+                     logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
+                     logging.info("JSON payload received from kafka: " + json.loads(msg.value))
                lastMessage = metricJson
                if("error" in metricJson):
                   logging.info(metricJson["error"])
