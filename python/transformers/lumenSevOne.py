@@ -7,6 +7,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
    ################################################################################################
 
    import json
+   import math
 
    # Build WAIOps json
    try:
@@ -16,7 +17,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       if("pmIndicator" in event_dict):
          # in Python, "NaN" values are considered unequal to everything, including themselves.
          # Here, we evaluate pmValue with itself to identify whether this is a NaN (Not a Number) value. If so, set metric to zero
-         if event_dict["pmValue"] != event_dict["pmValue"]:
+         if math.isnan(event_dict["pmValue"])
             #logging.debug("found NaN as value")
             waiopsMetric["metrics"][event_dict["pmIndicator"]] = float(0)
          else:
