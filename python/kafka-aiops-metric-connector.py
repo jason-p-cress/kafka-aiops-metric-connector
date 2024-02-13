@@ -391,7 +391,7 @@ def kafkaReader():
                 continue
             elif not msg.error():
                if sevOneKafkaDataFormat.lower() == "avro":
-                  metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics)
+                  metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
                else:
                   metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
                lastMessage = metricJson

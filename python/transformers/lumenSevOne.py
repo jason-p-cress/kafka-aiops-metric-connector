@@ -26,7 +26,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       #waiopsMetric["attributes"]["interface"] = event_dict["objectName"]
       waiopsMetric["attributes"]["group"] = watsonMetricGroup
       if(event_dict["pmIndicator"] in counterMetrics):
-         waiopsMetric["attributes"]["accumulators"] = event_dict["indicatorName"]
+         waiopsMetric["attributes"]["accumulators"] = event_dict["pmIndicator"]
       if("pmReportingTime" in event_dict):
          waiopsMetric["timestamp"] = str(event_dict["pmReportingTime"])
       else:
