@@ -1,0 +1,4 @@
+opening log file /home/jcress/sevone-watson-datachannel-2024/kafka-aiops-metric-connector-testing/log//sevone-datachannel.log
+Starting datachannel
+Starting queue reader for REST publishing
+{"groups": [{"attributes": {"node": "S605373JP6LB02", "group": "zabbix"}, "metrics": {"sysStatAuthFailureResults": 0.0}, "timestamp": "1706717743385", "tenantID": "ZABBIX", "resourceID": "S605373JP6LB02:Global Auth Stats"}]}
