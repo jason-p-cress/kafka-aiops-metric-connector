@@ -399,16 +399,25 @@ def kafkaReader():
                else:
                   try:
                      metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                     logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
-                     logging.info("JSON payload received from kafka: " + json.loads(msg.value))
+                     logging.info("JSON payload received from kafka: " + json.dumps(msg.value()))
                lastMessage = metricJson
                if("error" in metricJson):
                   logging.info(metricJson["error"])
                   #pass
                else:
-                  print(json.dumps(metricJson))
+                  logging.info("blah blah blah")
                   if 'timestamp' in metricJson["groups"][0]:
+                     #logging.info("good metric found: " + json.dumps(metricJson))
+                     for key, value in metricJson["groups"][0]["metrics"].items():
+                        #logging.info("Found metric:")
+                        #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
+                        #logging.info(key + ":" + str(value))
+                        if value != value:
+                           logging.info("NaN value found, ignoring")
+                     logging.info("that's all the metrics")
                      publishQueue.put(metricJson)
                      intervalMetricCount += 1
                      currTime = int(time.time() * 1000)
