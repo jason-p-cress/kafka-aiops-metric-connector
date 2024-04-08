@@ -1,0 +1,8 @@
+# sourceSSLCaLocation: pem file that contains the root ca certificate to be used for Kafka SSL communication
+sourceSSLCaLocation = "/path/to/rootcert.pem"
+# sourceSSLCertificateLocation: pem file that contains the server certificate to be used for Kafka SSL communication
+sourceSSLCertificateLocation = "/path/to/servercert.pem"
+# sourceSSLKeyLocation: pem file that contains the private key to be used for Kafka SSL communication
+sourceSSLKeyLocation = "/path/to/privatekey.pem"
+
+

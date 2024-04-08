@@ -45,40 +45,45 @@
 <h2>Configuring:</h2>
 
 NOTE: if SevOne is placing metrics in Avro format, you must obtain the SevOne Avro schema from the
-      SevOne Data Bus server. Replace the file 'config/sevone-avro-schema.json' with the schema
+      SevOne Data Bus server. Replace the file 'config/avro-schema.json' with the schema
       obtained from SDB.
 
-The properties file can be found at 'config/sevone-watson-datachannel.py'. The following properties
+The properties file can be found at 'config/kafka-aiops-metric-connector.props'. The following properties
 need to be configured:
 
-	**sevOneKafkaDataFormat** - either "Avro" or "JSON". Defaults to "Avro"
-	**sevOneKafkaTopicName** - the SevOne Data Bus kafka topic name. Defaults to "sdb"
-	**sevOneKafkaServers** - one or more SDB kafka server:port combinations, separated by commas. Required.
+	**sourceKafkaDataFormat** - either "Avro" or "JSON". Defaults to "Avro"
+	**sourceKafkaTopicName** - the kafka topic name. Defaults to "sdb"
+	**sourceKafkaServers** - one or more SDB kafka server:port combinations, separated by commas. Required.
 
 	   e.g.:
-	            sevOneKafkaServers = "sevonedbhost1:9092,sevonedbhost2:9092"
+	            sourceKafkaServers = "host1:9092,host2:9092"
 
-	**sevOneKafkaSSL** - set to 'true' if the SevOne Data Bus Kafka server requires SSL. If true, then 
-                         edit the config/sevone-kafka-ssl.props to include the CA and server certificates, 
+	**sourceKafkaSSL** - set to 'true' if the Kafka server requires SSL. If true, then 
+                         edit the config/source-kafka-ssl.props to include the CA and server certificates, 
                          and the key file.
 
-        **watsonProductTarget** - currently not implemented
-	**publishType** - currently not implemented
-	**watsonKafkaServers** - one or more Watson AIOops kafka servers for the mediation service, separated
+        **watsonProductTarget** - will either be "pi" for Predictive Insights, or "aiops" for CloudPak for AIOps
+	**publishType** - can be configured to publish to Predictive Insights REST mediation server's Kafka topic.
+                          If this is desired, set to "kafka". Otherwise, use "rest"
+	**watsonKafkaServers** - one or more Watson AIOops kafka servers for the PI mediation service, separated
 	                     by commas. Required.
-	**watsonKafkaTopicName** -  the topic name of the configured kafka. Defaults to 'metrics'.
-	**watsonMetricGroup** - metric group name used when subitting metrics. Defaults to 'sevone'
+	**watsonKafkaTopicName** -  the topic name of the PI kafka. Defaults to 'metrics'. Do not change this unless
+                                    you have a good reason.
+	**watsonMetricGroup** - metric group name used when subitting metrics via rest. Defaults to 'sevone'. This
+                                is used in the AIOps metric search UI
 	**watsonTopicName** - the name of the Watson MAD topic that was created to ingest kafka/REST metrics
 	                  in Predictive Insights, Metric Manager, or Watson MAD. Required.
 	**watsonTopicAggInterval** - the aggregation interval of the Watson topic in minutes. Defaults to 5. Not
 	                         strictly required to be set correctly, but will give accurate information
 	                         regarding the number of metrics, resources, and indicators per topic 
 	                         interval, which is useful for sizing.
-	**watsonKafkaSSL** - set to 'true' if the Watson Kafka server requires SSL. If true, then edit the
+	**watsonKafkaSSL** - set to 'true' if the Predictive Insights Kafka server requires SSL. If true, then edit the
                          config/watson-kafka-ssl.props to include the CA and server certificates, 
                          and the key file.
 
-	**restMediationServicePort** - currently not implemented
+	**restMediationServiceHost** - if publishing to the Predictive Insights REST API, this is the host that is
+                                       running the REST mediation service.
+	**restMediationServicePort** - if publishing to the Predictive Insights REST API, this is the TCP port
 	**logUniqueIndicators** - "true" or "false". If set to "true", every unique indicator name collected 
 	                      per interval is logged in the datachannel log file. Useful to identify whether
 	                      missing expected metrics are actually being received by the datachannel.
@@ -86,11 +91,9 @@ need to be configured:
 	                     interval is logged in the datachannel log file.
 	**logLevel** - For standard logging, set to "INFO". For additional/expanded logging set to "DEBUG"
 
-If SSL communication is required for the SevOne Kafka bus, you must edit the config/sevone-kafka-ssl.props to
+If SSL communication is required for the source Kafka bus, you must edit the config/source-kafka-ssl.props to
 include the CA and server certificates, and the key file.
  
-
-If SSL communication is required for the SevOne Kafka bus, you must edit the config/sevone-kafka-ssl.props to
 
 <h2>Starting the connector:</h2>
 
@@ -109,34 +112,28 @@ If SSL communication is required for the SevOne Kafka bus, you must edit the con
 
       To start the datachannel using the python script, run:
 
-         "nohup <install location>/python/sevone-watson-datachannel.py &"
-
-
-   Note that you can expect better performance using the compiled binary code, but if you need to customize
-   or make changes to the way the datachannel operates you have that freedom with the python code. Also,
-   located under the 'build' directory you can find the commands used to build the nuitka binaries if you
-   wish to compile your changes into a binary.
+         "nohup <install location>/python/kafka-aiops-metric-connector.py &"
 
 
 <h2>Verifying that the datachannel is working:</h2>
 
    The included 'pi-kafka-reader' and 'pi-kafka-reader.py' components will connect to the configured Watson
    AIOps kafka topic and print out all messages hitting the topic. This is a quick and easy way to verify 
-   that data is flowing from the SevOne SDB and to the Watson AIOps topic.
+   that data is flowing from the source Kafka and to the Watson AIOps topic.
 
    The following log files are found under the "<install location>/log" directory:
 
-      sevone-mediator.log	- info, debug, and performance and data stats are found here
+      kafka-aiops-metrics-connector.log	- info, debug, and performance and data stats are found here
       datachannel.out		- initial startup log entries
       datachannel.err		- runtime errors (stderr)
 
 <h2>Performance Monitoring</h2>
 
-      Various performance statistics are logged to the 'sevone-mediator.log' file every Watson AIOps metric
+      Various performance statistics are logged to the '.log' file every Watson AIOps metric
       interval:
 
-         Longest kafka latency for interval: This is the time it takes from SevOne collection, to the time
-            that it is read off of the SevOne SDB kafka topic. This should be as close to real-time as
+         Longest kafka latency for interval: This is the time it takes from collection, to the time
+            that it is read off of the kafka topic. This should be as close to real-time as
             possible (within seconds). If this latency time is longer than twice the Watson AIOps
             aggregation interval, you will likely need to extend the latency of the WAIOps topic. For 
             example, if the WAIOps aggregation interval is 5 minutes (300 seconds), and the kafka read
@@ -156,17 +153,18 @@ If SSL communication is required for the SevOne Kafka bus, you must edit the con
             devices/device groups.
 
          PI Kafka producer queue length: This should be as close to '0' as possible. If you are seeing a
-            high number, or the number is growing with each interval, 
+            high number, or the number is growing with each interval, this could indicate performance
+            issues with either AIOps or the server running this connector.
 
      Indicator and resource logging:
 
         You can log unique instances of resources and/or indicators seen during each aggregation interval by
-        enabling the extended logging options in the sevone-datachannel.conf file:
+        enabling the extended logging options in the conf file:
 
            logUniqueIndicators = "true"
            logUniqueResources = "true"
 
-        Depending on the size of your SevOne environment, this can cause a high amount of disk utilization.
+        Depending on the size of your metric source counts, this can cause a high amount of disk utilization.
    
 <h2>Installing python dependencies:</h2>
 

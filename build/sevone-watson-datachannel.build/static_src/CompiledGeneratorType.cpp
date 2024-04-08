@@ -1,1 +1,0 @@
-/usr/lib/python2.7/site-packages/nuitka/build/static_src/CompiledGeneratorType.c

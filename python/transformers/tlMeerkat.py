@@ -1,5 +1,8 @@
 
-def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName):
+def is_nan(x):
+   return (x != x)
+
+def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMetricGroup ):
 
    mkMetrics = {
       "in_bcast_vol_pkt",
@@ -42,6 +45,8 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       "out_pps"
    }
 
+   ignoreInterfaces = { 'VLAN', 'vlan', 'Loopback', 'loopback', 'Optics', 'Nu0', 'Null0', 'Lo0'  }
+
    import json
    #################################################################################################
    #
@@ -51,12 +56,17 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
 
    runError = {}
 
+
+   print("In the tlMeerkat code")
    # Build WAIOps json
    if("src" not in event_dict):
       runError["error"] = "WARNING: payload is missing \"src\" field, which we are expecting to contain the metric source. Will not process metric. JSON: " + json.dumps(event_dict) 
       return(runError)
+   elif("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys()):
+      runError["error"] = "WARNING: payload is missing admin_status or if_nm field" + json.dumps(event_dict)
+      return(runError)
    else:
-      if(event_dict["src"] = "snmp-Interface-pr"):
+      if(event_dict["src"] == "snmp-Interface-pr" ):
          try:
             waiopsMetric = dict()
             waiopsMetric["attributes"] = dict()
@@ -66,7 +76,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
             else:
                runError["error"] = "WARNING: payload is missing \"device_nm\" field. Will not process metric. JSON: " + json.dumps(event_dict) 
                return(runError)
-            if("if_name" in event_dict):
+            if("if_nm" in event_dict):
                component = event_dict["if_nm"]
             else:
                runError["error"] = "WARNING: payload is missing \"if_nm\" field. Will not process metric. JSON: " + json.dumps(event_dict) 
@@ -77,15 +87,18 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
             # cycle through all of the expected metrics....
             for metric in mkMetrics:
                if(metric in event_dict):
+                  if(is_nan(event_dict[metric])):
+                     waiopsMetric["metrics"][metric] = float(0)
+                  else:
+                     waiopsMetric["metrics"][metric] = float(event_dict[metric] )
                   if(event_dict[metric] in counterMetrics):
                      waiopsMetric["attributes"]["accumulators"] = event_dict[metric]
-            if("clock" in event_dict):
-               ts = str(int(event_dict["clock"] * 1000))
+            if("poll_ts" in event_dict):
+               ts = str(int(event_dict["poll_ts"] ))
                waiopsMetric["timestamp"] = ts
             else:
-               runError = "WARNING: payload is missing 'clock' field. Will not process metric. JSON: " + json.dumps(event_dict) 
+               runError = "WARNING: payload is missing 'poll_ts' field. Will not process metric. JSON: " + json.dumps(event_dict) 
                return(runError)
-            waiopsMetric["tenantID"] = watsonTopicName
             waiopsGroup = {}
             waiopsGroup["groups"] = []
             waiopsGroup["groups"].append(waiopsMetric)

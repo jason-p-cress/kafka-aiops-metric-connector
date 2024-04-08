@@ -1,7 +1,7 @@
 #!/usr/bin/python3.11
 
 #
-# SevOne Data Bus datachannel for Watson AIOps metric anomaly detection
+# Kafka to IBM AIOps connector for metric anomaly detection
 #
 # 04/01/22 - Jason Cress (jcress@us.ibm.com)
 # 12/19/22 - Restructured the threading, added interrupt handler, added SSL support for SDB
@@ -15,7 +15,7 @@
 
 import sys
 sys.path.insert(0, './transformers/')
-from lumenSevOne import translateToWatsonMetric
+#from tlMeerkat import translateToWatsonMetric
 
 
 import gzip
@@ -232,12 +232,8 @@ def logTimeDelta(first):
    #   - Longest kafka latency (seconds)
    # 
    #   These metrics show the average/longest time it takes from
-   #   SevOne's collection time to the time in which we pick it
-   #   up from the SevOne databus kafka. If these numbers are 
-   #   high (e.g. longer than the PI agg interval) it may be 
-   #   necessary to extend PI's topic latency. Additionally, 
-   #   it may be due to performance issues with the SevOne 
-   #   databus kafka server.
+   #    collection time to the time in which we pick it
+   #   up from the kafka topic. 
    #
    #   - Number of metrics consumed (count)
    #
@@ -246,10 +242,11 @@ def logTimeDelta(first):
    #   
    #   - PI Kafka producer queue length (count)
    #
-   #   The number of metrics waiting to be sent to PI's Kafka
-   #   topic. If this number is large (i.e. > 100) and/or
+   #   The number of metrics waiting to be sent to the AIOps
+   #   api. If this number is large (i.e. > 100) and/or
    #   continues to grow larger with every interval, then it is 
-   #   likely due to a performance issue with the PI Kafka server.
+   #   may be due to performance issues with this script, or 
+   #   problems AIOps is experiencing in handling the metric load
    # 
    #
    ###############################################################
@@ -304,7 +301,7 @@ def fastAvroDecode(msg_value):
 
    #############################################################################################
    #
-   # This function decodes the SevOne avro message, and returns a PI mapped/converted dictionary
+   # This function decodes the avro message, and returns a python dictionary structure
    #
    #############################################################################################
 
@@ -331,8 +328,8 @@ def publishMetric():
    while shutdownRequest != True:
       item = publishQueue.get()
       produceMetric(json.dumps(item))
-#      if(logRawJson):
-#         writeRawJson(json.dumps(item))
+      if(logRawJson):
+         writeRawJson(json.dumps(item))
       publishQueue.task_done()
 
 def restQueueReader():
@@ -351,6 +348,7 @@ def restQueueReader():
    print("Starting queue reader for REST publishing")
    lastPublishTime = int(time.time())
    while shutdownRequest != True:
+      # block until a message hits the publishQueue
       item = publishQueue.get()
       #print("got an item: " + json.dumps(item, indent=4))
       for metric in item["groups"]:
@@ -390,15 +388,15 @@ def kafkaReader():
             if msg is None:
                 continue
             elif not msg.error():
-               if sevOneKafkaDataFormat.lower() == "avro":
+               if sourceKafkaDataFormat.lower() == "avro":
                   try:
-                     metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                     metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup )
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
                      logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
                else:
                   try:
-                     metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
+                     metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup)
                      #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
@@ -408,6 +406,7 @@ def kafkaReader():
                   logging.info(metricJson["error"])
                   #pass
                else:
+                  print(metricJson)
                   if 'timestamp' in metricJson["groups"][0]:
                      #logging.info("good metric found: " + json.dumps(metricJson))
                      for key, value in metricJson["groups"][0]["metrics"].items():
@@ -500,10 +499,10 @@ def setupLogging():
       print(("Redirecting stderr to " + logHome + "datachannel.err"))
       sys.stdout = open(logHome + "datachannel.out", "w")
       sys.stderr = open(logHome + "datachannel.err", "w")
-      LOG_FILENAME=logHome + "sevone-datachannel.log"
+      LOG_FILENAME=logHome + "kafka-aiops-connector.log"
       now = datetime.now()
       ts = now.strftime("%d/%m/%Y %H:%M:%S")
-      print(("opening log file " + logHome + "/sevone-datachannel.log"))
+      print(("opening log file " + logHome + "/kafka-aiops-connector.log"))
       try:
          if loggingLevel.upper() == "INFO" or loggingLevel.upper() == "DEBUG":
             if loggingLevel.upper() == "INFO":
@@ -511,7 +510,7 @@ def setupLogging():
             else:
                logging.basicConfig(level=logging.DEBUG, filename=LOG_FILENAME, filemode="w+",format="%(asctime)-15s %(levelname)-8s %(message)s")
          else:
-            logging.info("WARNING: Unknown loggingLevel specified in sevone-watson-datachannel.props. Must be one of 'INFO' or 'DEBUG'. Defaulting to 'INFO'")
+            logging.info("WARNING: Unknown loggingLevel specified in kafka-aiops-metric-connector.props. Must be one of 'INFO' or 'DEBUG'. Defaulting to 'INFO'")
          logging.info("Mediator started at: " + ts + "\n")
       except:
          print("FATAL: failed to start logging. Verify logging path available and disk space.")
@@ -531,16 +530,16 @@ def configProperties():
    
    global ignoreMetrics
    global counterMetrics
-   global sevOneKafkaServers
+   global sourceKafkaServers
    global watsonKafkaServers
    global watsonTopicAggInterval
    global watsonKafkaTopicName
-   global sevOneKafkaTopicName
+   global sourceKafkaTopicName
    global logUniqueIndicators
    global logUniqueResources
    global watsonProductTarget
    global datachannelProps
-   global sevOneKafkaDataFormat
+   global sourceKafkaDataFormat
    global restMediationServiceAuthentication
    global authHeader
    global targetUrl
@@ -550,10 +549,10 @@ def configProperties():
    counterMetrics = set()
    loadCounters(mediatorHome + "/conf/counter-metrics.conf")
    
-   if(os.path.exists(mediatorHome + "/conf/sevone-watson-datachannel.props")):
-      props = loadProperties(mediatorHome + "/conf/sevone-watson-datachannel.props")
+   if(os.path.exists(mediatorHome + "/conf/kafka-aiops-metric-connector.props")):
+      props = loadProperties(mediatorHome + "/conf/kafka-aiops-metric-connector.props")
    else:
-      print(("FATAL: Properties file " + mediatorHome + "/conf/sevone-watson-datachannel.props is missing."))
+      print(("FATAL: Properties file " + mediatorHome + "/conf/kafka-aiops-metric-connector.props is missing."))
       exit()
    
    # convert properties to variables
@@ -580,15 +579,33 @@ def configProperties():
    logging.debug("Global variables:" + str(globals()))
    logging.debug("datachannelProps: " + str(datachannelProps))
 
-   # Ensure that one or more SevOne Data Bus Kafka servers are defined
+   # ensure that our transformer module is defined and that we can load the module
 
-   if 'sevOneKafkaServers' not in datachannelProps:
-      print("FATAL: sevOneKafkaServers not set in properties file! Specify at least one SevOne Data Bus Kafka server.")
-      logging.info("FATAL: sevOneKafkaServers not set in properties file! Specify at least one SevOne Data Bus Kafka server.")
+   if 'transformerLibrary' not in datachannelProps:
+      print("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
+      logging.info("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
       exit()
    else:
-      sevOneKafkaServers = datachannelProps['sevOneKafkaServers']
-      logging.debug("sevOneKafkaServers = " + str(sevOneKafkaServers))
+      import importlib
+      #from tlMeerkat import translateToWatsonMetric
+      try:
+         translateToWatsonMetric = importlib.import_module(datachannelProps['transformerLibrary'], package="translateToWatsonMetric") 
+      except:
+         print("FATAL: unable to load transformer module " + datachannelProps['transformerLibrary'])
+         logging.info("FATAL: unable to load transformer module " + datachannelProps['transformerLibrary'])
+         exit()
+      
+
+
+   # Ensure that one or more Kafka servers are defined
+
+   if 'sourceKafkaServers' not in datachannelProps:
+      print("FATAL: sourceKafkaServers not set in properties file! Specify at least one Kafka server.")
+      logging.info("FATAL: sourceKafkaServers not set in properties file! Specify at least one Kafka server.")
+      exit()
+   else:
+      sourceKafkaServers = datachannelProps['sourceKafkaServers']
+      logging.debug("sourceKafkaServers = " + str(sourceKafkaServers))
    
    if( "publishType" in globals()):
       publishType = datachannelProps["publishType"]
@@ -608,7 +625,7 @@ def configProperties():
          exit()
    else: 
       if watsonProductTarget.lower() == "pi":
-         logging.info("FATAL: publishType not set in sevone-watson-datachannel.props. Please set it to \"kafka\" or \"rest\"")
+         logging.info("FATAL: publishType not set in kafka-aiops-metric-connector.props. Please set it to \"kafka\" or \"rest\"")
          exit()
       else:
          logging.info("INFO: publishType not set but watsonProductTarget is \'aiops\', defaulting to \'rest\'")
@@ -659,9 +676,9 @@ def configProperties():
       # configure SSL for Watson Kafka, if required
    
       if watsonKafkaSSL == "true":
-         if(os.path.exists(mediatorHome + "/conf/sevone-kafka-ssl.props")):
+         if(os.path.exists(mediatorHome + "/conf/watson-kafka-ssl.props")):
             watsonKafkaSSLProps = loadProperties(mediatorHome + "/conf/watson-kafka-ssl.props")
-            logging.debug("SevOne Kafka SSL Properties: = " + json.dumps(watsonKafkaSSLProps))
+            logging.debug("Source Kafka SSL Properties: = " + json.dumps(watsonKafkaSSLProps))
             globals().update(watsonKafkaSSLProps)
             if(os.path.exists(watsonSSLCaLocation)):
                logging.debug("Watson Kafka SSL CA PEM file located at " + watsonSSLCaLocation)
@@ -719,14 +736,14 @@ def configProperties():
       watsonTopicAggInterval = datachannelProps['watsonTopicAggInterval']
       logging.debug("watsonTopicAggInterval = " + watsonTopicAggInterval)
    
-   # Verify the SevOne Data Bus Kafka topic name
+   # Verify the Kafka topic name
 
-   if 'sevOneKafkaTopicName' not in datachannelProps:
-      sevOneKafkaTopicName = "sdb"
-      logging.info("sevOneKafkaTopicName not specified in properties file. Defaulting to \"sdb\".")
+   if 'sourceKafkaTopicName' not in datachannelProps:
+      sourceKafkaTopicName = "sdb"
+      logging.info("sourceKafkaTopicName not specified in properties file. Defaulting to \"sdb\".")
    else:
-      sevOneKafkaTopicName = datachannelProps['sevOneKafkaTopicName']
-   logging.debug("sevOneKafkaTopicName = " + sevOneKafkaTopicName)
+      sourceKafkaTopicName = datachannelProps['sourceKafkaTopicName']
+   logging.debug("sourceKafkaTopicName = " + sourceKafkaTopicName)
 
    # Determine what IBM product this will integrate with, either the legacy Predictive Insights, or the Metric Anomaly Detection in either NOI or Watson AIOps AI Manager
 
@@ -818,47 +835,47 @@ def configProperties():
 #   else:
 #      logging.info("Watson Data Bus Kafka SSL not requested")
 
-   # Determine whether SSL communication is required for the SevOne Data Bus Kafka broker(s)
+   # Determine whether SSL communication is required for the Kafka broker(s)
 
-   if 'sevOneKafkaSSL' in datachannelProps:
-      sevOneKafkaSSL = datachannelProps['sevOneKafkaSSL'].lower()
-      if sevOneKafkaSSL.lower() == "true" or sevOneKafkaSSL.lower() == "false":
-         sevOneKafkaSSL = datachannelProps['sevOneKafkaSSL'].lower()
+   if 'sourceKafkaSSL' in datachannelProps:
+      sourceKafkaSSL = datachannelProps['sourceKafkaSSL'].lower()
+      if sourceKafkaSSL.lower() == "true" or sourceKafkaSSL.lower() == "false":
+         sourceKafkaSSL = datachannelProps['sourceKafkaSSL'].lower()
       else:
-         logging.info("WARNING: Unknown 'sevOneKafkaSSL' property set. Should be \"true\" or \"false\". Defaulting to \"false\"")
-         sevOneKafkaSSL = "false"
+         logging.info("WARNING: Unknown 'sourceKafkaSSL' property set. Should be \"true\" or \"false\". Defaulting to \"false\"")
+         sourceKafkaSSL = "false"
    else:
-      logging.info("sevOneKafkaSSL not set in props file. Defaulting to \"false\"")
-      sevOneKafkaSSL = "false"
+      logging.info("sourceKafkaSSL not set in props file. Defaulting to \"false\"")
+      sourceKafkaSSL = "false"
 
-   # configure SSL for SevOne Kafka, if required
+   # configure SSL for Kafka, if required
 
-   if sevOneKafkaSSL == "true":
-      if(os.path.exists(mediatorHome + "/conf/sevone-kafka-ssl.props")):
-         sevOneKafkaSSLProps = loadProperties(mediatorHome + "/conf/sevone-kafka-ssl.props")
-         logging.debug("SevOne Kafka SSL Properties: = " + json.dumps(sevOneKafkaSSLProps))
-         globals().update(sevOneKafkaSSLProps)
-         if(os.path.exists(sevOneSSLCaLocation)):
-            logging.debug("SevOne SSL CA PEM file located at " + sevOneSSLCaLocation)
+   if sourceKafkaSSL == "true":
+      if(os.path.exists(mediatorHome + "/conf/source-kafka-ssl.props")):
+         sourceKafkaSSLProps = loadProperties(mediatorHome + "/conf/source-kafka-ssl.props")
+         logging.debug("Kafka SSL Properties: = " + json.dumps(sourceKafkaSSLProps))
+         globals().update(sourceKafkaSSLProps)
+         if(os.path.exists(sourceSSLCaLocation)):
+            logging.debug("Kafka SSL CA PEM file located at " + sourceSSLCaLocation)
          else:
-            logging.info("FATAL: SevOne Kafka SSL requested, but root CA file not found at " + sevOneSSLCaLocation)
+            logging.info("FATAL: Source Kafka SSL requested, but root CA file not found at " + sourceSSLCaLocation)
             exit()
-         if(os.path.exists(sevOneSSLCertificateLocation)):
-            logging.debug("SevOne Kafka SSL server certificate file located at " + sevOneSSLCertificateLocation)
+         if(os.path.exists(sourceSSLCertificateLocation)):
+            logging.debug("Source Kafka SSL server certificate file located at " + sourceSSLCertificateLocation)
          else:
-            logging.info("FATAL: SevOne Kafka SSL requested, but server certificate file not found at " + sevOneSSLCertificateLocation)
+            logging.info("FATAL: Source Kafka SSL requested, but server certificate file not found at " + sourceSSLCertificateLocation)
             exit()
-         if(os.path.exists(sevOneSSLKeyLocation)):
-            logging.debug("SevOne Kafka SSL key file located at " + sevOneSSLKeyLocation)
+         if(os.path.exists(sourceSSLKeyLocation)):
+            logging.debug("Source Kafka SSL key file located at " + sourceSSLKeyLocation)
          else:
-            logging.info("FATAL: SevONe Kafka SSL requested, but SSL key file not found at " + sevOneSSLCertificateLocation)
+            logging.info("FATAL: Source Kafka SSL requested, but SSL key file not found at " + sourceSSLCertificateLocation)
             exit()
       else:
-         print(("FATAL: SevOne Kafka SSL set to true, but SevOne Kafka SSL properties file " + mediatorHome + "/conf/sevone-kafka-ssl.props is missing."))
-         logging.info("FATAL: Properties file " + mediatorHome + "/conf/sevone-kafka-ssl.props is missing.")
+         print(("FATAL: Source Kafka SSL set to true, but source Kafka SSL properties file " + mediatorHome + "/conf/source-kafka-ssl.props is missing."))
+         logging.info("FATAL: Properties file " + mediatorHome + "/conf/source-kafka-ssl.props is missing.")
          exit()
    else:
-      logging.info("SevOne Data Bus Kafka SSL not requested")
+      logging.info("Source Kafka SSL not requested")
    
 #############
 #
@@ -871,7 +888,7 @@ configProperties()
 
 global ignoreMetrics
 global counterMetrics
-global sevOneKafkaServers
+global sourceKafkaServers
 global watsonKafkaServers
 global watsonTopicAggInterval
 global watstonKafkaTopicName
@@ -888,9 +905,9 @@ intervalNumber = 0
 intervalMetricCount = 0
 
 
-if 'sevOneKafkaDataFormat' in datachannelProps:
-   sevOneKafkaDataFormat = datachannelProps['sevOneKafkaDataFormat'] 
-   if sevOneKafkaDataFormat.lower() == "avro":
+if 'sourceKafkaDataFormat' in datachannelProps:
+   sourceKafkaDataFormat = datachannelProps['sourceKafkaDataFormat'] 
+   if sourceKafkaDataFormat.lower() == "avro":
       try:
          import fastavro
       except ImportError:
@@ -902,12 +919,12 @@ if 'sevOneKafkaDataFormat' in datachannelProps:
       except ImportError:
          print("FATAL: Unable to load required Python package 'avro'. It can be installed using pip as such:\n\tpip install avro\n")
          exit()
-   elif sevOneKafkaDataFormat.lower() != "json":
-      logging.info("Unknown sevOneKafkaDataFormat value. Should be set to \"Avro\" or \"JSON\". Defaulting to \"Avro\".")
+   elif sourceKafkaDataFormat.lower() != "json":
+      logging.info("Unknown sourceKafkaDataFormat value. Should be set to \"Avro\" or \"JSON\". Defaulting to \"Avro\".")
 else:
-   logging.info("sevOneKafkaDataFormat not specified in properties file. Setting to \"Avro\".")
-   sevOneKafkaDataFormat = "Avro"
-logging.debug("sevOneKafkaDataFormat = " + sevOneKafkaDataFormat)
+   logging.info("sourceKafkaDataFormat not specified in properties file. Setting to \"Avro\".")
+   sourceKafkaDataFormat = "Avro"
+logging.debug("sourceKafkaDataFormat = " + sourceKafkaDataFormat)
 
 # Configure statistical logging for the data channel
 
@@ -937,20 +954,20 @@ else:
 #
 ################################
 
-if sevOneKafkaDataFormat.lower() == "avro":
-   if(os.path.exists(mediatorHome + "/conf/sevone-avro-schema.json")):
-      schemafile = open(mediatorHome + "/conf/sevone-avro-schema.json", "r")
+if sourceKafkaDataFormat.lower() == "avro":
+   if(os.path.exists(mediatorHome + "/conf/avro-schema.json")):
+      schemafile = open(mediatorHome + "/conf/avro-schema.json", "r")
       try:
          schema = json.loads(schemafile.read())
       except:
-         print("FATAL: Unable to parse SevOne Avro schema file. Please verify that it is the correct format (JSON)")
-         logging.info("FATAL: Unable to parse SevOne Avro schema file. Please verify that it is the correct format (JSON)")
+         print("FATAL: Unable to parse Avro schema file. Please verify that it is the correct format (JSON)")
+         logging.info("FATAL: Unable to parse Avro schema file. Please verify that it is the correct format (JSON)")
          exit()
    else:
-      print(("FATAL: SevOne data format is configured for Avro, but the required Avro schema file does not exist at " + mediatorHome + "/conf/sevone-avro-schema.json"))
-      print("Please obtain the SevOne Avro schema in the SevOne data bus config and place the JSON in the sevone-avro-schema.json file.")
-      logging.info("FATAL: SevOne data format is configured for Avro, but the required Avro schema file does not exist at " + mediatorHome + "/conf/sevone-avro-schema.json")
-      logging.info("Please obtain the SevOne Avro schema in the SevOne data bus config and place the JSON in the sevone-avro-schema.json file.")
+      print(("FATAL: Source Kafka data format is configured for Avro, but the required Avro schema file does not exist at " + mediatorHome + "/conf/avro-schema.json"))
+      print("Please obtain the Avro schema in config and place the JSON in the avro-schema.json file.")
+      logging.info("FATAL: Source Kafka data format is configured for Avro, but the required Avro schema file does not exist at " + mediatorHome + "/conf/avro-schema.json")
+      logging.info("Please obtain the Avro schema and place the JSON in the avro-schema.json file.")
       exit()
 
    print(("Going to parse avro schema: " + json.dumps(schema)))
@@ -997,7 +1014,7 @@ logging.debug("Validate publisher type and if Kafka, configure Kafka properties,
 
 if( "publishType" not in globals()):
 
-   logging.info("FATAL: publishType not set in sevone-watson-datachannel.props. Please set it to \"kafka\" or \"rest\"")
+   logging.info("FATAL: publishType not set in kafka-aiops-metric-connector.props. Please set it to \"kafka\" or \"rest\"")
    exit()
 
 if publishType.lower() == "kafka":
@@ -1006,7 +1023,7 @@ if publishType.lower() == "kafka":
    
    watsonKafkaConfig = {
         'bootstrap.servers': watsonKafkaServers,
-        'client.id': "SevOneDatachannel@" + socket.gethostname(),
+        'client.id': "ibmAIOpsMetrics@" + socket.gethostname(),
         'queue.buffering.max.ms': 5}
    
    if watsonKafkaSSL.lower() == "true":
@@ -1060,12 +1077,12 @@ else:
 
 #############################
 #
-# Connect to SevOne Kafka bus
+# Connect to source Kafka bus
 #
 #############################
 
 kafkasettings = {
-    'bootstrap.servers': sevOneKafkaServers,
+    'bootstrap.servers': sourceKafkaServers,
     'group.id': 'waiopsMetric-Restgroup',
     'client.id': 'waiopsMetric-Restclient-1@' + socket.gethostname(),
     'enable.auto.commit': False,
@@ -1074,15 +1091,15 @@ kafkasettings = {
     'default.topic.config': {'auto.offset.reset': 'latest'}
 }
 
-if sevOneKafkaSSL.lower() == "true":
+if sourceKafkaSSL.lower() == "true":
    kafkasslsettings = {
       'security.protocol' : 'SSL',
-      'ssl.ca.location': sevOneSSLCaLocation,
-      'ssl.certificate.location': sevOneSSLCertificateLocation,
-      'ssl.key.location': sevOneSSLKeyLocation }
+      'ssl.ca.location': sourceSSLCaLocation,
+      'ssl.certificate.location': sourceSSLCertificateLocation,
+      'ssl.key.location': sourceSSLKeyLocation }
    kafkasettings.update(kafkasslsettings)
 else:
-   logging.debug("SevOne SDB Kafka connection does not require SSL")
+   logging.debug("Source Kafka connection does not require SSL")
 
 
 logging.debug("kafka settings are: " + str(kafkasettings))
@@ -1091,7 +1108,7 @@ c = Consumer(kafkasettings)    # is this version buggy? thinks this is a Produce
 
 
 
-logging.debug("Verifying SevOne kafka topic - listing topics")
+logging.debug("Verifying kafka topic - listing topics")
 logging.info("==============================================")
 logging.info("= IGNORE FOLLOWING PRODUCER WARNINGS         =")
 logging.info("==============================================")
@@ -1100,24 +1117,24 @@ logging.info("==============================================")
 admin_client = AdminClient(kafkasettings)
 topics = admin_client.list_topics().topics
 if not topics:
-   logging.info("FATAL: Unable to verify connectivity and topics in SevOne kafka bus at " + sevOneKafkaServers + ". Verify kafka configuration, reconfigure, and retry.")
-   print(("FATAL: Unable to verify connectivity and topics in SevOne kafka bus at " + sevOneKafkaServers + ". Verify kafka configuration, reconfigure, and retry."))
+   logging.info("FATAL: Unable to verify connectivity and topics in kafka bus at " + sourceKafkaServers + ". Verify kafka configuration, reconfigure, and retry.")
+   print(("FATAL: Unable to verify connectivity and topics in kafka bus at " + sourceKafkaServers + ". Verify kafka configuration, reconfigure, and retry."))
    exit()
-elif sevOneKafkaTopicName not in topics:
-   print(("FATAL: SevOne kafka topic name does not exist in SevOne kafka. Available topics: " + topics + ". Ensure proper topic configuration."))
+elif sourceKafkaTopicName not in topics:
+   print(("FATAL: source kafka topic name does not exist in kafka. Available topics: " + topics + ". Ensure proper topic configuration."))
    exit()
 
-logging.debug("Successfully listed topics in SevOne kafka. Topics returned: " + str(topics))
+logging.debug("Successfully listed topics in the source kafka. Topics returned: " + str(topics))
 
-logging.debug("Subscribing to SevOne kafka topic")
+logging.debug("Subscribing to source kafka topic")
 try:
-   c.subscribe([sevOneKafkaTopicName])
+   c.subscribe([sourceKafkaTopicName])
 except Exception as e:
-   logging.info("FATAL: Unable to connect to SevOne Kafka bus at " + sevOneKafkaServers + ". Verify Kafka configuration, reconfigure, and retry.")
-   print(("FATAL: Unable to connect to SevOne Kafka bus at " + sevOneKafkaServers + ". Verify Kafka configuration, reconfigure, and retry."))
+   logging.info("FATAL: Unable to connect to Kafka bus at " + sourceKafkaServers + ". Verify Kafka configuration, reconfigure, and retry.")
+   print(("FATAL: Unable to connect to Kafka bus at " + sourceKafkaServers + ". Verify Kafka configuration, reconfigure, and retry."))
    exit()
    
-logging.debug("SevOne Kafka Topic available.")
+logging.debug("Source Kafka Topic available.")
 
 
 ######################
@@ -1135,7 +1152,7 @@ signal.signal(signal.SIGHUP, reconfigHandler)
 
 
 
-# Start a reader thread to connect to the SevOne kafka bus and receive messages
+# Start a reader thread to connect to the kafka bus and receive messages
 
 kafkaReaderThread = threading.Thread(target=kafkaReader)
 kafkaReaderThread.daemon = True
