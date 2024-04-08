@@ -57,7 +57,8 @@ need to be configured:
 
 	   e.g.:
 	            sourceKafkaServers = "host1:9092,host2:9092"
-
+	**transformerLibrary - the name of the library that transform the source JSON metric to the required PI or AIOps format.
+                               The code libraries live under the <installationdir>/python/transformers/ directory.
 	**sourceKafkaSSL** - set to 'true' if the Kafka server requires SSL. If true, then 
                          edit the config/source-kafka-ssl.props to include the CA and server certificates, 
                          and the key file.
