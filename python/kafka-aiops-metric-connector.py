@@ -14,7 +14,8 @@
 #
 
 import sys
-sys.path.insert(0, './transformers/')
+
+#sys.path.append('./transformers/')
 #from tlMeerkat import translateToWatsonMetric
 
 
@@ -49,10 +50,6 @@ import signal
 
 
 def writeZipFile(fileName, metricData):
-
-   #myZipFile = zipfile.ZipFile(fileName + ".zip", mode='w')
-   #myZipFile.writestr(fileName, metricData)
-   #close(myZipFile) 
 
    gz = gzip.open(fileName + ".gz", 'wb')
    gz.write(metricData)
@@ -208,8 +205,9 @@ def postMetric(postedData):
             else:
                logging.info("max retries reached for metric post, saving to file and continuing...")
                savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
-               wrz = threading.Thread(target=writeZipFile, args=(savFileName, encodedMetricData), kwargs={})
-               wrz.start()
+               writeZipFile(savFileName, encodedMetricData)
+               #wrz = threading.Thread(target=writeZipFile, args=(savFileName, encodedMetricData), kwargs={})
+               #wrz.start()
                #savFile = open(mediatorHome + "/log/metricsave__" + currTime + ".json", "w")
                #savFile.write(encodedMetricData)
                doRetry = False 
@@ -313,7 +311,7 @@ def writeRawJson(rawJson):
 
    jsonLogFileLocation.write(json.dumps(rawJson, indent=4) + "\n") 
 
-def publishMetric():
+def kafkaQueueReader():
 
    ###########################
    #
@@ -332,11 +330,12 @@ def publishMetric():
          writeRawJson(json.dumps(item))
       publishQueue.task_done()
 
-def restQueueReader():
+def publishQueueReader():
 
    global shutdownRequest
-   restBatchSize = 10000
-   publishFrequency = 60
+   global publishType
+   restBatchSize = 50000
+   publishFrequency = 300
 
    global restMetricGroup 
 
@@ -345,7 +344,7 @@ def restQueueReader():
 
    # block until a message hits the publish queue
 
-   print("Starting queue reader for REST publishing")
+   logging.info("Starting queue reader for " + publishType + " publishing")
    lastPublishTime = int(time.time())
    while shutdownRequest != True:
       # block until a message hits the publishQueue
@@ -355,18 +354,30 @@ def restQueueReader():
          #print("metric: " + str(metric))
          restMetricGroup["groups"].append(metric)
       if(len(restMetricGroup["groups"]) == restBatchSize):
-         logging.debug("publishing batch of 10000")
-         postMetric(json.dumps(restMetricGroup))
+         logging.debug("publishing batch of " + restBatchSize)
+         if(publishType.lower == "rest"):
+            postMetric(json.dumps(restMetricGroup))
+         else:
+            savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
+            encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
+            writeZipFile(savFileName, encodedMetricData)
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
       elif( int(time.time()) - lastPublishTime > publishFrequency  and len(restMetricGroup["groups"]) > 0 ):
          logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on publishFrequency of " + str(publishFrequency))
-         postMetric(json.dumps(restMetricGroup))
+         if(publishType.lower == "rest"):
+            postMetric(json.dumps(restMetricGroup))
+         else:
+            savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
+            encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
+            writeZipFile(savFileName, encodedMetricData)
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
-      publishQueue.task_done()
+      else:
+         pass
+   publishQueue.task_done()
 
 
 def kafkaReader():
@@ -390,13 +401,13 @@ def kafkaReader():
             elif not msg.error():
                if sourceKafkaDataFormat.lower() == "avro":
                   try:
-                     metricJson = translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup )
+                     metricJson = transformerModule.translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup )
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
                      logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
                else:
                   try:
-                     metricJson = translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup)
+                     metricJson = transformerModule.translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup)
                      #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
@@ -578,23 +589,6 @@ def configProperties():
    
    logging.debug("Global variables:" + str(globals()))
    logging.debug("datachannelProps: " + str(datachannelProps))
-
-   # ensure that our transformer module is defined and that we can load the module
-
-   if 'transformerLibrary' not in datachannelProps:
-      print("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
-      logging.info("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
-      exit()
-   else:
-      import importlib
-      #from tlMeerkat import translateToWatsonMetric
-      try:
-         translateToWatsonMetric = importlib.import_module(datachannelProps['transformerLibrary'], package="translateToWatsonMetric") 
-      except:
-         print("FATAL: unable to load transformer module " + datachannelProps['transformerLibrary'])
-         logging.info("FATAL: unable to load transformer module " + datachannelProps['transformerLibrary'])
-         exit()
-      
 
 
    # Ensure that one or more Kafka servers are defined
@@ -1010,7 +1004,7 @@ publishQueue = queue.Queue()
 #
 ####################################################
 
-logging.debug("Validate publisher type and if Kafka, configure Kafka properties, and if REST, start a restQueueThread")
+logging.debug("Validate publisher type and if Kafka, configure Kafka properties, and if REST, start a publishQueueThread")
 
 if( "publishType" not in globals()):
 
@@ -1050,27 +1044,9 @@ if publishType.lower() == "kafka":
    
    logging.debug("Watson AIOps Kafka topic available.")
 
-
-
-elif publishType.lower() == "rest":
-
-   # start up a thread to pick up the queue messages and add them to the restMetricGroup["groups"] 
-   logging.debug("publishType is \'rest\', let's start a restQueueThread")
-   
-   restQueueThread = threading.Thread(target=restQueueReader)
-   restQueueThread.daemon = True
-   restQueueThread.start()
-   # start up a thread to publish every 60 seconds
-
-#   restPublishThread = threading.Thread(target=postMetric)
-#   restPublishThread.daemon = True
-#   restPublishThread.start()
-   #perfStatThread.join()
-
-   
-
+elif (publishType.lower() == "rest" or publishType.lower() == "file"):
+   pass
 else:
-
    logging.info("FATAL: unknown publishType property. Should be \"kafka\" or \"rest\". Please check the properties file and ensure publishType is configured properly.")
    exit()
 
@@ -1108,9 +1084,8 @@ c = Consumer(kafkasettings)    # is this version buggy? thinks this is a Produce
 
 
 
-logging.debug("Verifying kafka topic - listing topics")
 logging.info("==============================================")
-logging.info("= IGNORE FOLLOWING PRODUCER WARNINGS         =")
+logging.debug("=   Verifying kafka topic - listing topics   =")
 logging.info("==============================================")
 
 
@@ -1143,6 +1118,32 @@ logging.debug("Source Kafka Topic available.")
 #
 ######################
 
+# Ensure that our transformer module is defined and that we can load the module
+
+if 'transformerLibrary' not in datachannelProps:
+   print("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
+   logging.info("FATAL: transformerLibrary is not defined in the properties file. Specify which transformer you wish to use.")
+   exit()
+else:
+   logging.info("Transformer library to use is " + datachannelProps['transformerLibrary'])
+   logging.debug("Adding transformers path at " + mediatorHome + "/python/transformers/")
+   #sys.path.insert(0, os.path.abspath(mediatorHome + '/python/transformers'))
+   #sys.path.insert(0, './transformers/')
+   for path in sys.path:
+      print(path)
+   sys.path.append(os.path.abspath(mediatorHome + '/python/transformers'))
+   for path in sys.path:
+      print(path)
+   import importlib
+   try:
+      transformerModule = importlib.import_module(datachannelProps['transformerLibrary'])
+   except Exception as error:
+      logging.info("FATAL: unable to load transformer module " + datachannelProps['transformerLibrary'] + ". Error: " + str(error))
+      logging.info(str(error))
+      exit()
+      
+
+
 
 # Set up signal handlers for interrupt signal (e.g. CTRL-C) and HUP signal
 
@@ -1161,13 +1162,19 @@ kafkaReaderThread.start()
 
 
 # Start a publisher thread that will pick up transformed metric JSON and place it on the Watson kafka topic
+# or POST to PI/AIOps or write to a file
 
 if(publishType.lower == "kafka"):
-   publishThread = threading.Thread(target=publishMetric)
+   publishThread = threading.Thread(target=kafkaQueueReader)
    publishThread.daemon = True
    publishThread.start()
    #publishThread.join()
-
+else:
+   # start up a thread to pick up the queue messages and add them to the restMetricGroup["groups"], and publish to rest or file
+   logging.debug("publishType is \'rest\', let's start a publishQueueThread")
+   publishQueueThread = threading.Thread(target=publishQueueReader)
+   publishQueueThread.daemon = True
+   publishQueueThread.start()
 
 # Start a performance statistics thread to keep track of various performance metrics (queue depth, etc)
 
