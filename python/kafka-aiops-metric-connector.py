@@ -406,41 +406,46 @@ def kafkaReader():
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
                      logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
                else:
-                  try:
-                     metricJson = transformerModule.translateToWatsonMetric(json.loads(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup)
-                     #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
-                  except Exception as error:
-                     logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
-                     logging.info("JSON payload received from kafka: " + json.dumps(msg.value()))
-               lastMessage = metricJson
-               if("error" in metricJson):
-                  logging.info(metricJson["error"])
-                  #pass
-               else:
-                  print(metricJson)
-                  if 'timestamp' in metricJson["groups"][0]:
-                     #logging.info("good metric found: " + json.dumps(metricJson))
-                     for key, value in metricJson["groups"][0]["metrics"].items():
-                        # Normalize metrics if NaN value
-                        #logging.info("Found metric:")
-                        #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
-                        #logging.info(key + ":" + str(value))
-                        if value != value:
-                           logging.debug("NaN value found, setting NaN value to zero")
-                           metricJson["groups"][0]["metrics"][key] = int(0)
-                     logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
-                     publishQueue.put(metricJson)
-                     intervalMetricCount += 1
-                     currTime = int(time.time() * 1000)
-                     deltaTime = currTime - int(metricJson["groups"][0]["timestamp"])
-                     if(deltaTime > longestDelta):
-                        longestDelta = deltaTime
-                     for key in metricJson["groups"][0]["metrics"]:
-                        intervalMetricSet.add(key)
-                     if 'resourceID' in metricJson["groups"][0]:
-                        intervalResourceSet.add(metricJson["groups"][0]["resourceID"])
-                  else:
-                     logging.info("WARNING: Message received contains no timestamp field. Message is: " + json.dumps(metricJson))
+                  #lines = format(msg.value()).splitlines()
+                  lines = msg.value().splitlines()
+                  for line in lines:
+                     metric = json.loads(line)
+                     logging.debug("transforming " + str(metric))
+                     try:
+                        metricJson = transformerModule.translateToWatsonMetric(json.loads(line),  ignoreMetrics, counterMetrics, watsonMetricGroup)
+                        #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
+                     except Exception as error:
+                        logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
+                        logging.info("JSON payload received from kafka: " + json.dumps(line))
+                     lastMessage = metricJson
+                     if("error" in metricJson):
+                        logging.info(metricJson["error"])
+                        #pass
+                     else:
+                        #print(metricJson)
+                        if 'timestamp' in metricJson["groups"][0]:
+                           #logging.info("good metric found: " + json.dumps(metricJson))
+                           for key, value in metricJson["groups"][0]["metrics"].items():
+                              # Normalize metrics if NaN value
+                              #logging.info("Found metric:")
+                              #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
+                              #logging.info(key + ":" + str(value))
+                              if value != value:
+                                 logging.debug("NaN value found, setting NaN value to zero")
+                                 metricJson["groups"][0]["metrics"][key] = int(0)
+                           logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
+                           publishQueue.put(metricJson)
+                           intervalMetricCount += 1
+                           currTime = int(time.time() * 1000)
+                           deltaTime = currTime - int(metricJson["groups"][0]["timestamp"])
+                           if(deltaTime > longestDelta):
+                              longestDelta = deltaTime
+                           for key in metricJson["groups"][0]["metrics"]:
+                              intervalMetricSet.add(key)
+                           if 'resourceID' in metricJson["groups"][0]:
+                              intervalResourceSet.add(metricJson["groups"][0]["resourceID"])
+                        else:
+                           logging.info("WARNING: Message received contains no timestamp field. Message is: " + json.dumps(metricJson))
                 
             elif msg.error().code() == KafkaError._PARTITION_EOF:
                 logging.info('Kafka error: end of partition reached')
