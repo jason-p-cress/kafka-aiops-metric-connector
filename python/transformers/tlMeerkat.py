@@ -57,16 +57,16 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
    runError = {}
 
 
-   print("In the tlMeerkat code")
    # Build WAIOps json
    if("src" not in event_dict):
+      # the "src" field tells us the type of payload is, if it's missing then we will not know how to process it so we ignore it
       runError["error"] = "WARNING: payload is missing \"src\" field, which we are expecting to contain the metric source. Will not process metric. JSON: " + json.dumps(event_dict) 
-      return(runError)
-   elif("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys()):
-      runError["error"] = "WARNING: payload is missing admin_status or if_nm field" + json.dumps(event_dict)
       return(runError)
    else:
       if(event_dict["src"] == "snmp-Interface-pr" ):
+         if("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys()):
+            runError["error"] = "WARNING: payload is missing admin_status or if_nm field" + json.dumps(event_dict)
+            return(runError)
          try:
             waiopsMetric = dict()
             waiopsMetric["attributes"] = dict()
@@ -97,7 +97,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
                ts = str(int(event_dict["poll_ts"] ))
                waiopsMetric["timestamp"] = ts
             else:
-               runError = "WARNING: payload is missing 'poll_ts' field. Will not process metric. JSON: " + json.dumps(event_dict) 
+               runError["error"] = "WARNING: payload is missing 'poll_ts' field. Will not process metric. JSON: " + json.dumps(event_dict) 
                return(runError)
             waiopsGroup = {}
             waiopsGroup["groups"] = []
@@ -105,8 +105,10 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
             #logging.debug("posting metric: " + json.dumps(waiopsGroup, indent=4))
             return(waiopsGroup)
          except Exception as error:
-            print("An exception occurred: " + str(error))
-            print("Unable to process message: " + json.dumps(event_dict))
-            runError = "An exception occurred: " + str(error)
+            #print("An exception occurred: " + str(error))
+            #print("Unable to process message: " + json.dumps(event_dict))
+            runError["error"] = "An exception occurred in tlMeerkat translation: " + str(error)
             return(runError)
-
+      else:
+         runError["error"] = "Kafka payload src is not of snmp-Interface-pr, ignoring"
+         return(runError)

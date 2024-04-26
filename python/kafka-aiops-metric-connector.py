@@ -271,7 +271,8 @@ def logTimeDelta(first):
       logging.info('Number of unique metric indicators: ' + str(len(intervalMetricSet)))
       logging.info('Number of unique resources: ' + str(len(intervalResourceSet)))
       logging.info('Datachannel producer queue length: ' + str(publishQueue.qsize()))
-      if(publishType.lower() == "rest"):
+      #logging.info('Datachannel publisher metric group size: ' + str(len(restMetricGroup["groups"])))
+      if(publishType.lower() == "rest" or publishType.lower() == "file"):
          logging.info('Size of metricGroup now: ' + str(len(restMetricGroup["groups"] )))
       intervalMetricSet.clear()
       intervalResourceSet.clear()
@@ -335,7 +336,7 @@ def publishQueueReader():
    global shutdownRequest
    global publishType
    restBatchSize = 50000
-   publishFrequency = 300
+   filePublishFrequency = 300
 
    global restMetricGroup 
 
@@ -353,9 +354,9 @@ def publishQueueReader():
       for metric in item["groups"]:
          #print("metric: " + str(metric))
          restMetricGroup["groups"].append(metric)
-      if(len(restMetricGroup["groups"]) == restBatchSize):
-         logging.debug("publishing batch of " + restBatchSize)
-         if(publishType.lower == "rest"):
+      if(len(restMetricGroup["groups"]) == restBatchSize and publishType == "rest"):
+         logging.debug("publishing batch of " + str(restBatchSize))
+         if(publishType.lower() == "rest"):
             postMetric(json.dumps(restMetricGroup))
          else:
             savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
@@ -364,8 +365,8 @@ def publishQueueReader():
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
-      elif( int(time.time()) - lastPublishTime > publishFrequency  and len(restMetricGroup["groups"]) > 0 ):
-         logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on publishFrequency of " + str(publishFrequency))
+      elif( int(time.time()) - lastPublishTime > filePublishFrequency  and len(restMetricGroup["groups"]) > 0 and publishType.lower() == "file" ):
+         logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on filePublishFrequency of " + str(filePublishFrequency))
          if(publishType.lower == "rest"):
             postMetric(json.dumps(restMetricGroup))
          else:
@@ -1176,7 +1177,7 @@ if(publishType.lower == "kafka"):
    #publishThread.join()
 else:
    # start up a thread to pick up the queue messages and add them to the restMetricGroup["groups"], and publish to rest or file
-   logging.debug("publishType is \'rest\', let's start a publishQueueThread")
+   logging.debug("publishType is \'rest\' or file, let's start a publishQueueThread")
    publishQueueThread = threading.Thread(target=publishQueueReader)
    publishQueueThread.daemon = True
    publishQueueThread.start()
