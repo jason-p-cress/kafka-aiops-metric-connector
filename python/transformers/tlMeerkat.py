@@ -45,9 +45,18 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       "out_pps"
    }
 
+   # The following controls filtering.
+   import json
+
+   # Interfaces that start with the following text will be ignored
    ignoreInterfaces = { 'VLAN', 'vlan', 'Loopback', 'loopback', 'Optics', 'Nu0', 'Null0', 'Lo0'  }
 
-   import json
+   # Will ignore metrics from device types that are not included in devTypesOfInterest
+   devTypesOfInterest = { 'BR', 'RE', 'CI', 'GR' }
+
+   # Will ignore metrics that are not included in the provincesOfInterest variable
+   provincesOfInterest = { 'AB', 'BC' }
+
    #################################################################################################
    #
    # This is the translation function to translate the Meerkat json format to the Watson json format
@@ -66,6 +75,29 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       if(event_dict["src"] == "snmp-Interface-pr" ):
          if("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys()):
             runError["error"] = "WARNING: payload is missing admin_status or if_nm field" + json.dumps(event_dict)
+            return(runError)
+         # check to ensure the interface is not administratively down. If so, ignore the metric
+         if(event_dict['admin_status'] == "down" or event_dict['admin_status'] == 0):
+            runError["error"] = "ignore"
+            return(runError)
+         # check to ensure the interface is not in our ignore interfaces list. If so, ignore the metric
+         #if list(filter(event_dict['if_nm'].startswith, ignoreInterfaces)) != []:
+            #print("ignored interface")
+            #runError["error"] = "ignore"
+            #return(runError)
+         for interface in ignoreInterfaces:
+             if(event_dict['if_nm'].startswith(interface)):
+                runError["error"] = "ignore"
+                print("Ignoring metric due to ignored interface: " + event_dict['if_nm'])
+                return(runError)
+         # check to ensure the device type that generated the metric is a device we are interested in:
+         if event_dict['device_type'] not in devTypesOfInterest:
+            runError["error"] = "ignore"
+            print("Ignoring metric due to device_type not in devTypesOfInterest: " + event_dict['device_type'])
+            return(runError)
+         # check the location code to ensure it is in our interest 
+         if event_dict['prov'] not in provincesOfInterest:
+            runError["error"] = "ignore"
             return(runError)
          try:
             waiopsMetric = dict()

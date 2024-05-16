@@ -420,7 +420,8 @@ def kafkaReader():
                         logging.info("JSON payload received from kafka: " + json.dumps(line))
                      lastMessage = metricJson
                      if("error" in metricJson):
-                        logging.info(metricJson["error"])
+                        if metricJson["error"] != "ignore":
+                           logging.info(metricJson["error"])
                         #pass
                      else:
                         #print(metricJson)
@@ -1102,7 +1103,7 @@ if not topics:
    print(("FATAL: Unable to verify connectivity and topics in kafka bus at " + sourceKafkaServers + ". Verify kafka configuration, reconfigure, and retry."))
    exit()
 elif sourceKafkaTopicName not in topics:
-   print(("FATAL: source kafka topic name does not exist in kafka. Available topics: " + topics + ". Ensure proper topic configuration."))
+   print(("FATAL: source kafka topic name does not exist in kafka. Available topics: " + str(topics) + ". Ensure proper topic configuration."))
    exit()
 
 logging.debug("Successfully listed topics in the source kafka. Topics returned: " + str(topics))
