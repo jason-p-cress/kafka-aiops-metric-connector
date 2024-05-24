@@ -73,6 +73,10 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       return(runError)
    else:
       if(event_dict["src"] == "snmp-Interface-pr" ):
+         if("device_type" not in event_dict.keys()):
+            event_dict['device_type'] = event_dict['device_nm'][8] + event_dict['device_nm'][9]
+         if("prov" not in event_dict.keys()):
+            event_dict['prov'] = event_dict['device_nm'][4] + event_dict['device_nm'][5]
          if("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys() or "device_type" not in event_dict.keys()):
             runError["error"] = "WARNING: payload is missing admin_status or if_nm or device_type field" + json.dumps(event_dict)
             return(runError)
