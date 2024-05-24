@@ -92,12 +92,12 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
          for interface in ignoreInterfaces:
              if(event_dict['if_nm'].startswith(interface)):
                 runError["error"] = "ignore"
-                print("Ignoring metric due to ignored interface: " + event_dict['if_nm'])
+                #print("Ignoring metric due to ignored interface: " + event_dict['if_nm'])
                 return(runError)
          # check to ensure the device type that generated the metric is a device we are interested in:
          if event_dict['device_type'] not in devTypesOfInterest:
             runError["error"] = "ignore"
-            print("Ignoring metric due to device_type not in devTypesOfInterest: " + str(event_dict['device_type']))
+            #print("Ignoring metric due to device_type not in devTypesOfInterest: " + str(event_dict['device_type']))
             return(runError)
          # check the location code to ensure it is in our interest 
          if event_dict['prov'] not in provincesOfInterest:
@@ -107,6 +107,10 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
             waiopsMetric = dict()
             waiopsMetric["attributes"] = dict()
             waiopsMetric["metrics"] = dict()
+            if("device_type" in event_dict):
+               waiopsMetric["attributes"]["device_type"] = event_dict["device_type"]
+            if("province" in event_dict):
+               waiopsMetric["attributes"]["province"] = event_dict["prov"]
             if("device_nm" in event_dict):
                waiopsMetric["attributes"]["node"] = event_dict["device_nm"]
             else:
