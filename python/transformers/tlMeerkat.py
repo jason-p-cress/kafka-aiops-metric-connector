@@ -73,8 +73,8 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
       return(runError)
    else:
       if(event_dict["src"] == "snmp-Interface-pr" ):
-         if("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys()):
-            runError["error"] = "WARNING: payload is missing admin_status or if_nm field" + json.dumps(event_dict)
+         if("admin_status" not in event_dict.keys() or "if_nm" not in event_dict.keys() or "device_type" not in event_dict.keys()):
+            runError["error"] = "WARNING: payload is missing admin_status or if_nm or device_type field" + json.dumps(event_dict)
             return(runError)
          # check to ensure the interface is not administratively down. If so, ignore the metric
          if(event_dict['admin_status'] == "down" or event_dict['admin_status'] == 0):
@@ -93,7 +93,7 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
          # check to ensure the device type that generated the metric is a device we are interested in:
          if event_dict['device_type'] not in devTypesOfInterest:
             runError["error"] = "ignore"
-            print("Ignoring metric due to device_type not in devTypesOfInterest: " + event_dict['device_type'])
+            print("Ignoring metric due to device_type not in devTypesOfInterest: " + str(event_dict['device_type']))
             return(runError)
          # check the location code to ensure it is in our interest 
          if event_dict['prov'] not in provincesOfInterest:
