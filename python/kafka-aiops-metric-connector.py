@@ -396,7 +396,7 @@ def kafkaReader():
     lastMessage = "NULL"
     try:
         while shutdownRequest != True:
-            msg = c.poll(0.1)
+            msg = c.poll(1)
             if msg is None:
                 continue
             elif not msg.error():
@@ -455,7 +455,7 @@ def kafkaReader():
                 #      .format(msg.topic(), msg.partition()))
             else:
                 #logging.info('Kafka error occured: {0}'.format(msg.error().str()))
-                logging.info('Kafka error occured')
+                logging.info('Kafka error occured: ' + str(msg.error().code()))
     
     except Exception as error:
        logging.info("An exception occurred: " + str(error))
@@ -1071,6 +1071,7 @@ kafkasettings = {
     'enable.auto.commit': False,
     'session.timeout.ms': 6000,
     'socket.timeout.ms': 3000,
+    'max.poll.interval.ms': 6000,
     'default.topic.config': {'auto.offset.reset': 'latest'}
 }
 
