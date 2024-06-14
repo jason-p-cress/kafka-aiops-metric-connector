@@ -150,5 +150,5 @@ def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMet
             runError["error"] = "An exception occurred in tlMeerkat translation: " + str(error)
             return(runError)
       else:
-         runError["error"] = "Kafka payload src is not of snmp-Interface-pr, ignoring"
+         runError["error"] = "ignore"
          return(runError)

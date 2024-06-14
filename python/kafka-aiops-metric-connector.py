@@ -459,19 +459,19 @@ def kafkaReader():
     
     except Exception as error:
        logging.info("An exception occurred: " + str(error))
-       shutdownRequest = True
+       #shutdownRequest = True
        now = datetime.now()
        ts = now.strftime("%d/%m/%Y %H-%M-%S")
-       logging.info('Mediator shut down at: ' + ts)
+       #logging.info('Mediator shut down at: ' + ts)
+       logging.info('Mediator continuing after error at: ' + ts)
        if(lastMessage):
           logging.info('Last message: ' + json.dumps(lastMessage))
        if(publishThread.is_alive()):
-          
           logging.debug("publishThread is still alive")
        if(perfStatThread.is_alive()):
           logging.debug("perfStatThread is still alive")
-       c.close()
-       sys.stdout.close()
+       #c.close()
+       #sys.stdout.close()
 
 def setupFilePaths():
    
