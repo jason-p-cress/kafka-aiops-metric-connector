@@ -394,7 +394,8 @@ def kafkaReader():
 
     shutdownRequest = False
     lastMessage = "NULL"
-    try:
+#    try:
+    if(1==1):
         while shutdownRequest != True:
             msg = c.poll(1)
             if msg is None:
@@ -425,9 +426,12 @@ def kafkaReader():
                         #pass
                      else:
                         #print(metricJson)
+                        # No error received during transformation, continue to publish
                         if 'timestamp' in metricJson["groups"][0]:
+                           # Technically this shouldn't happen...
                            #logging.info("good metric found: " + json.dumps(metricJson))
                            for key, value in metricJson["groups"][0]["metrics"].items():
+                              # NaN values are not acceptable in MAD, and will cause an error if trying to publish...
                               # Normalize metrics if NaN value
                               #logging.info("Found metric:")
                               #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
@@ -437,6 +441,7 @@ def kafkaReader():
                                  metricJson["groups"][0]["metrics"][key] = int(0)
                            logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                            publishQueue.put(metricJson)
+                           # Let's track some useful performance metrics...
                            intervalMetricCount += 1
                            currTime = int(time.time() * 1000)
                            deltaTime = currTime - int(metricJson["groups"][0]["timestamp"])
@@ -457,21 +462,21 @@ def kafkaReader():
                 #logging.info('Kafka error occured: {0}'.format(msg.error().str()))
                 logging.info('Kafka error occured: ' + str(msg.error().code()))
     
-    except Exception as error:
-       logging.info("An exception occurred: " + str(error))
-       #shutdownRequest = True
-       now = datetime.now()
-       ts = now.strftime("%d/%m/%Y %H-%M-%S")
-       #logging.info('Mediator shut down at: ' + ts)
-       logging.info('Mediator continuing after error at: ' + ts)
-       if(lastMessage):
-          logging.info('Last message: ' + json.dumps(lastMessage))
-       if(publishThread.is_alive()):
-          logging.debug("publishThread is still alive")
-       if(perfStatThread.is_alive()):
-          logging.debug("perfStatThread is still alive")
-       #c.close()
-       #sys.stdout.close()
+#    except Exception as error:
+#       logging.info("An exception occurred: " + str(error))
+#       #shutdownRequest = True
+#       now = datetime.now()
+#       ts = now.strftime("%d/%m/%Y %H-%M-%S")
+#       #logging.info('Mediator shut down at: ' + ts)
+#       logging.info('Mediator continuing after error at: ' + ts)
+#       if(lastMessage):
+#          logging.info('Last message: ' + json.dumps(lastMessage))
+#       if(publishThread.is_alive()):
+#          logging.debug("publishThread is still alive")
+#       if(perfStatThread.is_alive()):
+#          logging.debug("perfStatThread is still alive")
+#       #c.close()
+#       #sys.stdout.close()
 
 def setupFilePaths():
    
