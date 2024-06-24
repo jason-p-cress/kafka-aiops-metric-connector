@@ -188,7 +188,7 @@ def postMetric(postedData):
             if(watsonProductTarget == "pi"):
                request.add_header("X-TenantID",watsonTopicName)
             logging.debug("setting authentication header, if required")
-            if(restMediationServiceAuthentication.lower() == "true"):
+            if(watsonProductTarget == "pi" and restMediationServiceAuthentication.lower() == "true"):
                request.add_header("Authorization",authHeader)
             if(watsonProductTarget == "aiops"):
                request.add_header("X-TenantID",watsonTenantId)
@@ -196,6 +196,7 @@ def postMetric(postedData):
             logging.debug("Posting with headers: " + str(request.headers))
             request.get_method = lambda: method
             response = urllib.request.urlopen(request)
+            logging.debug("AIOps metric POST response code: " + str(response.getcode()) + ", response reason: " + response.reason )
             doRetry = False
       
          except IOError as e:
@@ -231,8 +232,8 @@ def logTimeDelta(first):
 
    ###############################################################
    #
-   # This function runs every PI interval (5-minutes), and logs
-   # out the following information:
+   # This function runs every 5-minutes, and publishes metrics.
+   # It also logs out the following information:
    #
    #   - Average kafka latency (seconds)
    #   - Longest kafka latency (seconds)
@@ -264,12 +265,17 @@ def logTimeDelta(first):
          time.sleep(secToInterval)
       currTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
       first=False
+      publisherFiveMin()
       logging.info('==== INTERVAL STATISTICS FOR ' + currTime + '====')
       ###############################################
       #
       # If indicator/resource logging is requested...
       #
       ###############################################
+      if publishQueueThread.is_alive():
+         logging.info("Publishing thread is alive")
+      if kafkaReaderThread.is_alive():
+         logging.info("Kafka reader thread is alive")
       if(logUniqueIndicators.lower() == "true"):
          logging.debug('Unique indicators seen during interval: ' + str(intervalMetricSet))
       if(logUniqueResources.lower() == "true"):
@@ -345,7 +351,6 @@ def publishQueueReader():
    global shutdownRequest
    global publishTypes
    restBatchSize = 50000
-   filePublishFrequency = 300
 
    global restMetricGroup 
 
@@ -354,7 +359,7 @@ def publishQueueReader():
 
    # block until a message hits the publish queue
 
-   logging.info("Starting queue reader for publishing")
+   logging.info("Starting queue reader for publishing.") 
    lastPublishTime = int(time.time())
    while shutdownRequest != True:
       # block until a message hits the publishQueue
@@ -363,33 +368,48 @@ def publishQueueReader():
       for metric in item["groups"]:
          #print("metric: " + str(metric))
          restMetricGroup["groups"].append(metric)
-      if(len(restMetricGroup["groups"]) == restBatchSize and publishType == "rest"):
+      if(len(restMetricGroup["groups"]) >= restBatchSize):
+
+         # If we are getting a large amount of metrics within a 5 minute period, we should do quicker publishing... in this case 50000 metrics
          logging.debug("publishing batch of " + str(restBatchSize))
          for publishType in publishTypes:
             if(publishType.lower() == "rest"):
+               logging.debug("Publishing batch to REST")
                postMetric(json.dumps(restMetricGroup))
             if(publishType.lower() == "file"):
+               logging.debug("Publishing batch to file")
                savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
                encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
                writeZipFile(savFileName, encodedMetricData)
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
-      elif( int(time.time()) - lastPublishTime > filePublishFrequency  and len(restMetricGroup["groups"]) > 0 and publishType.lower() == "file" ):
-         logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on filePublishFrequency of " + str(filePublishFrequency))
-         for publishType in publishTypes:
-            if(publishType.lower == "rest"):
-               postMetric(json.dumps(restMetricGroup))
-            if(publishType.lower == "file"):
-               savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
-               encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
-               writeZipFile(savFileName, encodedMetricData)
-         restMetricGroup.clear()
-         restMetricGroup["groups"] = []
-         lastPublishTime = int(time.time())
-      else:
-         pass
    publishQueue.task_done()
+
+def publisherFiveMin():
+
+   # this thread publishes collected metrics every 5 minutes
+
+   global publishType
+   global restMetricGroup
+   filePublishFrequency = 300
+
+   if(len(restMetricGroup["groups"]) > 0):
+      logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on filePublishFrequency of " + str(filePublishFrequency))
+      for publishType in publishTypes:
+         if(publishType.lower() == "rest"):
+            logging.debug("Publishing on frequency to REST")
+            postMetric(json.dumps(restMetricGroup))
+         if(publishType.lower() == "file"):
+            logging.debug("Publishing on frequency to file")
+            savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
+            encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
+            writeZipFile(savFileName, encodedMetricData)
+      restMetricGroup.clear()
+      restMetricGroup["groups"] = []
+      lastPublishTime = int(time.time())
+   else:
+      logging.info("No metrics received in last 5 minutes")
 
 
 def kafkaReader():
@@ -426,7 +446,7 @@ def kafkaReader():
                         metric = json.loads(line)
                      else:
                         logging.info("String received is not a valid JSON. Received: " + str(line))
-                     logging.debug("transforming " + str(metric))
+                     #logging.debug("transforming " + str(metric))
                      try:
                         metricJson = transformerModule.translateToWatsonMetric(json.loads(line),  ignoreMetrics, counterMetrics, watsonMetricGroup)
                         #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
@@ -453,7 +473,7 @@ def kafkaReader():
                               if value != value:
                                  logging.debug("NaN value found, setting NaN value to zero")
                                  metricJson["groups"][0]["metrics"][key] = int(0)
-                           logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
+                           #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                            publishQueue.put(metricJson)
                            # Let's track some useful performance metrics...
                            intervalMetricCount += 1
