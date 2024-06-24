@@ -48,6 +48,14 @@ import re
 import time
 import signal
 
+def is_json(str):
+
+   # This function tests whether a string is valid json or not. returns True or False
+   try:
+      json_object = json.loads(str)
+   except ValueError as e:
+      return False
+   return True
 
 def writeZipFile(fileName, metricData):
 
@@ -57,7 +65,7 @@ def writeZipFile(fileName, metricData):
    
 def shutdownHandler(*args):
    shutdownRequest = True
-   raise SystemExit('Exiting')
+   raise SystemExit('Exiting via user request')
 
 def reconfigHandler(*args):
    logging.info("###############################################")
@@ -272,7 +280,8 @@ def logTimeDelta(first):
       logging.info('Number of unique resources: ' + str(len(intervalResourceSet)))
       logging.info('Datachannel producer queue length: ' + str(publishQueue.qsize()))
       #logging.info('Datachannel publisher metric group size: ' + str(len(restMetricGroup["groups"])))
-      if(publishType.lower() == "rest" or publishType.lower() == "file"):
+      #if(publishType.lower() == "rest" or publishType.lower() == "file"):
+      if("rest" in publishTypes or "file" in publishTypes ):
          logging.info('Size of metricGroup now: ' + str(len(restMetricGroup["groups"] )))
       intervalMetricSet.clear()
       intervalResourceSet.clear()
@@ -334,7 +343,7 @@ def kafkaQueueReader():
 def publishQueueReader():
 
    global shutdownRequest
-   global publishType
+   global publishTypes
    restBatchSize = 50000
    filePublishFrequency = 300
 
@@ -345,7 +354,7 @@ def publishQueueReader():
 
    # block until a message hits the publish queue
 
-   logging.info("Starting queue reader for " + publishType + " publishing")
+   logging.info("Starting queue reader for publishing")
    lastPublishTime = int(time.time())
    while shutdownRequest != True:
       # block until a message hits the publishQueue
@@ -356,23 +365,25 @@ def publishQueueReader():
          restMetricGroup["groups"].append(metric)
       if(len(restMetricGroup["groups"]) == restBatchSize and publishType == "rest"):
          logging.debug("publishing batch of " + str(restBatchSize))
-         if(publishType.lower() == "rest"):
-            postMetric(json.dumps(restMetricGroup))
-         else:
-            savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
-            encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
-            writeZipFile(savFileName, encodedMetricData)
+         for publishType in publishTypes:
+            if(publishType.lower() == "rest"):
+               postMetric(json.dumps(restMetricGroup))
+            if(publishType.lower() == "file"):
+               savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
+               encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
+               writeZipFile(savFileName, encodedMetricData)
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
       elif( int(time.time()) - lastPublishTime > filePublishFrequency  and len(restMetricGroup["groups"]) > 0 and publishType.lower() == "file" ):
          logging.debug("publishing " + str(len(restMetricGroup["groups"])) + " metrics on filePublishFrequency of " + str(filePublishFrequency))
-         if(publishType.lower == "rest"):
-            postMetric(json.dumps(restMetricGroup))
-         else:
-            savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
-            encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
-            writeZipFile(savFileName, encodedMetricData)
+         for publishType in publishTypes:
+            if(publishType.lower == "rest"):
+               postMetric(json.dumps(restMetricGroup))
+            if(publishType.lower == "file"):
+               savFileName = mediatorHome + "/log/metricsave__" + datetime.now().strftime("%Y-%m-%d_%H:%M:%S") + ".json"
+               encodedMetricData = json.dumps(restMetricGroup).encode('utf-8')
+               writeZipFile(savFileName, encodedMetricData)
          restMetricGroup.clear()
          restMetricGroup["groups"] = []
          lastPublishTime = int(time.time())
@@ -411,14 +422,17 @@ def kafkaReader():
                   #lines = format(msg.value()).splitlines()
                   lines = msg.value().splitlines()
                   for line in lines:
-                     metric = json.loads(line)
+                     if is_json(line):
+                        metric = json.loads(line)
+                     else:
+                        logging.info("String received is not a valid JSON. Received: " + str(line))
                      logging.debug("transforming " + str(metric))
                      try:
                         metricJson = transformerModule.translateToWatsonMetric(json.loads(line),  ignoreMetrics, counterMetrics, watsonMetricGroup)
                         #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                      except Exception as error:
-                        logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
-                        logging.info("JSON payload received from kafka: " + json.dumps(line))
+                        logging.info("An exception occurred in transformation of the following kafka JSON payload: " + str(line))
+                        #logging.info("JSON payload received from kafka: " + json.dumps(line))
                      lastMessage = metricJson
                      if("error" in metricJson):
                         if metricJson["error"] != "ignore":
@@ -613,35 +627,55 @@ def configProperties():
       sourceKafkaServers = datachannelProps['sourceKafkaServers']
       logging.debug("sourceKafkaServers = " + str(sourceKafkaServers))
    
-   if( "publishType" in globals()):
-      publishType = datachannelProps["publishType"]
-      if "watsonProductTarget" in globals():
-         if(watsonProductTarget.lower() == "pi" and publishType.lower() == "rest"):
-            if( restMediationServiceProtocol.lower() in [ "http", "https" ] ):
-               if( "restMediationServicePort" in globals() and "restMediationServiceHost" in globals()):
-                  targetUrl = restMediationServiceProtocol + '://' + restMediationServiceHost + ':' + restMediationServicePort + '/metrics/api/1.0/metrics'
-               else:
-                  logging.info("FATAL: restMediationServicePort and/or restMediationServiceHost properties missing. Please configure these properties for PI rest mediation")
+   global publishTypes
+   publishTypes = []
+   if( "publisherTypes" in globals()):
+      publishers = datachannelProps["publisherTypes"].split(",")
+      for publisher in publishers:
+         if publisher.lower() in [ "kafka", "rest", "file" ]:
+            if "watsonProductTarget" in globals():
+               if(watsonProductTarget.lower() == "pi" and publisher.lower() == "rest"):
+                  if( restMediationServiceProtocol.lower() in [ "http", "https" ] ):
+                     if( "restMediationServicePort" in globals() and "restMediationServiceHost" in globals()):
+                        targetUrl = restMediationServiceProtocol + '://' + restMediationServiceHost + ':' + restMediationServicePort + '/metrics/api/1.0/metrics'
+                     else:
+                        logging.info("FATAL: restMediationServicePort and/or restMediationServiceHost properties missing. Please configure these properties for PI rest mediation")
+                        exit()
+                  else:
+                     logging.info("FATAL: Unknown restMediationServiceProtocol configured. Must be \'http\' or \'https\'")
+                     exit()
+                  if 'restMediationServiceAuthentication' in datachannelProps:
+                     restMediationServiceAuthentication = datachannelProps['restMediationServiceAuthentication']
+                     logging.debug("restMediationServiceAuthentication is " + restMediationServiceAuthentication)
+                     if(restMediationServiceAuthentication.lower() == "true"):
+                        logging.debug("REST authentication required")
+                        if('restMediationServiceUsername' in datachannelProps and 'restMediationServicePassword' in datachannelProps):
+                           restMediationServiceUsername = datachannelProps['restMediationServiceUsername'].encode("utf-8")
+                           restMediationServicePassword = datachannelProps['restMediationServicePassword'].encode("utf-8")
+                           authHeader = 'Basic '.encode("utf-8") + base64.b64encode(restMediationServiceUsername + ":".encode("utf-8") + restMediationServicePassword)
+                           logging.debug("Auth header is: " + authHeader.decode("ascii"))
+                        else:
+                           logging.debug("REST mediation authentication requested, but missing restMediationServiceUsername | restMediationServicePassword in the config file")
+                           exit()
+                  else:
+                     logging.info("Did not find restMediationServiceAuthentication property in configuration. Not requestiong authentication")
+                     restMediationServiceAuthentication = "false"
+
+               if(watsonProductTarget.lower() == "aiops" and publisher.lower() == "kafka"):
+                  logging.info("FATAL: publishType is set to \'kafka'\, but watsonProductTarget is \'aiops\'. This is an unsupported configuration. For watsonProductTarget of \'aiops\' you must use \'rest\' and/or \'file\'")
                   exit()
             else:
-               logging.info("FATAL: Unknown restMediationServiceProtocol configured. Must be \'http\' or \'https\'")
+               logging.info("FATAL: watsonProductTarget not set. Must be \'aiops\' or \'pi\'")
                exit()
-      else:
-         logging.info("FATAL: watsonProductTarget not set. Must be \'aiops\' or \'pi\'")
-         exit()
+            publishTypes.append(publisher)
+         else:
+            logging.info("WARNING: unknown publisher type (" + publisher + ") defined in publisherTypes configuration. Must be one of 'kafka', 'rest', or 'file'")
+      if( len(publishTypes) == 0 ):
+         logging.info("FATAL: No valid publisherTypes were defined in configuration file. Must be 'kafka', 'rest', or 'file'")
+
    else: 
-      if watsonProductTarget.lower() == "pi":
-         logging.info("FATAL: publishType not set in kafka-aiops-metric-connector.props. Please set it to \"kafka\" or \"rest\"")
-         exit()
-      else:
-         logging.info("INFO: publishType not set but watsonProductTarget is \'aiops\', defaulting to \'rest\'")
-         publishType = "rest"
-
-   if( publishType.lower == "kafka" ):
-
-      if watsonProductTarget.lower() == "aiops":
-         logging.info("FATAL: publishType is set to \'kafka'\, but watsonProductTarget is \'aiops\'. This is an unsupported configuration. For watsonProductTarget of \'aiops\' you must use \'rest\'")
-         exit()
+      logging.info("FATAL: publisherTypes not set in kafka-aiops-metric-connector.props. Please set to one or more of 'kafka', 'rest', or 'file'")
+      exit()
 
    # Ensure that one or more Watson AIOps Kafka servers are defined
 
@@ -708,26 +742,6 @@ def configProperties():
       else:
          logging.info("Watson Data Bus Kafka SSL not requested")
 
-   elif( publishType == "rest" ):
-
-      if 'restMediationServiceAuthentication' in datachannelProps:
-         restMediationServiceAuthentication = datachannelProps['restMediationServiceAuthentication']
-         logging.debug("restMediationServiceAuthentication is " + restMediationServiceAuthentication)
-         if(restMediationServiceAuthentication.lower() == "true"):
-            logging.debug("REST authentication required")
-            if('restMediationServiceUsername' in datachannelProps and 'restMediationServicePassword' in datachannelProps):
-               restMediationServiceUsername = datachannelProps['restMediationServiceUsername'].encode("utf-8")
-               restMediationServicePassword = datachannelProps['restMediationServicePassword'].encode("utf-8")
-               authHeader = 'Basic '.encode("utf-8") + base64.b64encode(restMediationServiceUsername + ":".encode("utf-8") + restMediationServicePassword)
-               logging.debug("Auth header is: " + authHeader.decode("ascii")) 
-            else:
-               logging.debug("REST mediation authentication requested, but missing restMediationServiceUsername | restMediationServicePassword in the config file")
-               exit()
-      else:
-         logging.info("Did not find restMediationServiceAuthentication property in configuration. Not requestiong authentication")
-         restMediationServiceAuthentication = "false"
-
-      
 
       #restMetricGroup = {}
 
@@ -1018,12 +1032,8 @@ publishQueue = queue.Queue()
 
 logging.debug("Validate publisher type and if Kafka, configure Kafka properties, and if REST, start a publishQueueThread")
 
-if( "publishType" not in globals()):
 
-   logging.info("FATAL: publishType not set in kafka-aiops-metric-connector.props. Please set it to \"kafka\" or \"rest\"")
-   exit()
-
-if publishType.lower() == "kafka":
+if "kafka" in publisherTypes:
 
    logging.debug("connecting to watsonKafkaServers: " + watsonKafkaServers)
    
@@ -1055,12 +1065,6 @@ if publishType.lower() == "kafka":
       exit()
    
    logging.debug("Watson AIOps Kafka topic available.")
-
-elif (publishType.lower() == "rest" or publishType.lower() == "file"):
-   pass
-else:
-   logging.info("FATAL: unknown publishType property. Should be \"kafka\" or \"rest\". Please check the properties file and ensure publishType is configured properly.")
-   exit()
 
 
 #############################
@@ -1177,7 +1181,7 @@ kafkaReaderThread.start()
 # Start a publisher thread that will pick up transformed metric JSON and place it on the Watson kafka topic
 # or POST to PI/AIOps or write to a file
 
-if(publishType.lower == "kafka"):
+if("kafka" in publishTypes):
    publishThread = threading.Thread(target=kafkaQueueReader)
    publishThread.daemon = True
    publishThread.start()

@@ -24,9 +24,10 @@ transformerLibrary = "tlMeerkat"
 # watsonProductTarget - either 'aiops' or 'pi'. Use 'pi' for Predictive Insights, or 'aiops' for Metric Anomaly Detection (MAD) on AI Manager, AIOps, or NOI
 watsonProductTarget = "aiops"
 
-# publishType - either 'kafka' to publish to the kafka topic of Predictive Insights REST mediation utility kafka, or "rest" so send to the metrics REST api for AIMgr/NOI/PI REST mediation utility
-publishType = "rest" 
-
+# publisherTypes - can be one or more comma-separated values of 'file', 'kafka' (for Predictive Insights REST mediation kafka), or "rest" (for AIMgr/NOI/PI REST mediation utility). If "file" is chosen, metrics will be written to timestamped files in the 'log' directory
+#
+# For example, to publish to both AIOps via API, and write out files, use: "file,rest"
+publisherTypes = "file"
 
 # watsonKafkaTopicName - the topic name of the configured kafka. Typically 'metrics'
 # ignored if publishType = "rest"
