@@ -2,7 +2,7 @@
 def is_nan(x):
    return (x != x)
 
-def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMetricGroup ):
+def translateToWatsonMetric(event_dict, ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName ):
 
    mkMetrics = {
       "in_bcast_vol_pkt",

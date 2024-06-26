@@ -3,15 +3,7 @@
 #
 # Kafka to IBM AIOps connector for metric anomaly detection
 #
-# 04/01/22 - Jason Cress (jcress@us.ibm.com)
-# 12/19/22 - Restructured the threading, added interrupt handler, added SSL support for SDB
-#  4/20/23 - Fixed scope issues when using SSL certificates
-#
-# TODO:
-#
-# - sleep and retry when connection lost to either sdb or watson
-#
-#
+
 
 import sys
 
@@ -274,8 +266,12 @@ def logTimeDelta(first):
       ###############################################
       if publishQueueThread.is_alive():
          logging.info("Publishing thread is alive")
+      else:
+         logging.info("Publishing thread is DEAD")
       if kafkaReaderThread.is_alive():
          logging.info("Kafka reader thread is alive")
+      else:
+         logging.info("Kafka reader thread is DEAD")
       if(logUniqueIndicators.lower() == "true"):
          logging.debug('Unique indicators seen during interval: ' + str(intervalMetricSet))
       if(logUniqueResources.lower() == "true"):
@@ -434,7 +430,7 @@ def kafkaReader():
             elif not msg.error():
                if sourceKafkaDataFormat.lower() == "avro":
                   try:
-                     metricJson = transformerModule.translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup )
+                     metricJson = transformerModule.translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName )
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
                      logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
@@ -442,24 +438,30 @@ def kafkaReader():
                   #lines = format(msg.value()).splitlines()
                   lines = msg.value().splitlines()
                   for line in lines:
+                     # first, test if we get string or bytes
+                     if isinstance(line, bytes):
+                        logging.debug("kafka message line is a bytes object, converting to utf-8")
+                        line.decode("utf-8")
                      if is_json(line):
                         metric = json.loads(line)
                      else:
                         logging.info("String received is not a valid JSON. Received: " + str(line))
                      #logging.debug("transforming " + str(metric))
                      try:
-                        metricJson = transformerModule.translateToWatsonMetric(json.loads(line),  ignoreMetrics, counterMetrics, watsonMetricGroup)
+                        metricJson = transformerModule.translateToWatsonMetric(json.loads(line),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName)
                         #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                      except Exception as error:
                         logging.info("An exception occurred in transformation of the following kafka JSON payload: " + str(line))
+                        metricJson = json.loads("{\"error\": \"An exception occurred in transformation of the following kafka JSON payload: " + str(line) + "\" }")
                         #logging.info("JSON payload received from kafka: " + json.dumps(line))
                      lastMessage = metricJson
                      if("error" in metricJson):
-                        if metricJson["error"] != "ignore":
+                        if metricJson["error"] == "ignore":
+                           pass
+                        else:
+                           logging.info("Error occurred during metric processing:")
                            logging.info(metricJson["error"])
-                        #pass
                      else:
-                        #print(metricJson)
                         # No error received during transformation, continue to publish
                         if 'timestamp' in metricJson["groups"][0]:
                            # Technically this shouldn't happen...

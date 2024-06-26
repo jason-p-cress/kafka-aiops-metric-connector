@@ -15,7 +15,7 @@ sourceKafkaServers = "localhost:9092"
 sourceKafkaSSL = "false"
 
 # transformerLibrary - This is the name of the transformer library to be used. Transformers are located in the python/transformers directory
-transformerLibrary = "tlMeerkat"
+transformerLibrary = "lumenBrix"
 
 #########################################################################
 # Predictive Insights / Metric Manager / Watson AIOPs configuration items
