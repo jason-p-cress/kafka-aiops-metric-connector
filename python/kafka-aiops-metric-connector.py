@@ -428,13 +428,27 @@ def kafkaReader():
             if msg is None:
                 continue
             elif not msg.error():
+               metricJson = ""
+               #logging.debug("received message: " + str(msg.value()))
                if sourceKafkaDataFormat.lower() == "avro":
                   try:
                      metricJson = transformerModule.translateToWatsonMetric(fastAvroDecode(msg.value()),  ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName )
                   except Exception as error:
                      logging.info("An exception occurred in transformation of kafka JSON payload: " + str(error))
                      logging.info("JSON payload received from kafka: " + fastAvroDecode(msg.value()))
-               else:
+               elif sourceKafkaDataFormat.lower() == "csv":
+                  entries = msg.value()
+                  if isinstance(entries, bytes):
+                     logging.debug("kafka message line is a bytes object, converting to utf-8")
+                     lines = entries.decode("utf-8").splitlines(True)
+                  for line in lines:
+                     try:
+                        logging.debug("Transforming CSV line: " + str(line))
+                        metricJson = transformerModule.translateToWatsonMetric(line, ignoreMetrics, counterMetrics, watsonMetricGroup, watsonTopicName )
+                     except Exception as error:
+                        logging.info("An exception occurred in transformation of kafka CSV payload: " + str(error))
+                        logging.info("CSV payload received from kafka: " + str(lines) )
+               elif sourceKafkaDataFormat.lower() == "json":
                   #lines = format(msg.value()).splitlines()
                   lines = msg.value().splitlines()
                   for line in lines:
@@ -452,43 +466,51 @@ def kafkaReader():
                         #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
                      except Exception as error:
                         logging.info("An exception occurred in transformation of the following kafka JSON payload: " + str(line))
+                        logging.info("error: " + str(error))
                         metricJson = json.loads("{\"error\": \"An exception occurred in transformation of the following kafka JSON payload: " + str(line) + "\" }")
                         #logging.info("JSON payload received from kafka: " + json.dumps(line))
-                     lastMessage = metricJson
-                     if("error" in metricJson):
-                        if metricJson["error"] == "ignore":
-                           pass
-                        else:
-                           logging.info("Error occurred during metric processing:")
-                           logging.info(metricJson["error"])
-                     else:
-                        # No error received during transformation, continue to publish
-                        if 'timestamp' in metricJson["groups"][0]:
-                           # Technically this shouldn't happen...
-                           #logging.info("good metric found: " + json.dumps(metricJson))
-                           for key, value in metricJson["groups"][0]["metrics"].items():
-                              # NaN values are not acceptable in MAD, and will cause an error if trying to publish...
-                              # Normalize metrics if NaN value
-                              #logging.info("Found metric:")
-                              #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
-                              #logging.info(key + ":" + str(value))
-                              if value != value:
-                                 logging.debug("NaN value found, setting NaN value to zero")
-                                 metricJson["groups"][0]["metrics"][key] = int(0)
-                           #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
-                           publishQueue.put(metricJson)
-                           # Let's track some useful performance metrics...
-                           intervalMetricCount += 1
-                           currTime = int(time.time() * 1000)
-                           deltaTime = currTime - int(metricJson["groups"][0]["timestamp"])
-                           if(deltaTime > longestDelta):
-                              longestDelta = deltaTime
-                           for key in metricJson["groups"][0]["metrics"]:
-                              intervalMetricSet.add(key)
-                           if 'resourceID' in metricJson["groups"][0]:
-                              intervalResourceSet.add(metricJson["groups"][0]["resourceID"])
-                        else:
-                           logging.info("WARNING: Message received contains no timestamp field. Message is: " + json.dumps(metricJson))
+               else:
+                  logging.info("FATAL: unknown sourceKafkaDataFormat: " + sourceKafkaDataFormat)
+                  exit()
+               lastMessage = metricJson
+               if("error" in metricJson):
+                  # Transformer module returned error. If error is to ignore the metric, pass. Otherwise, log the error message received from the transformer module
+                  if metricJson["error"] == "ignore":
+                     pass
+                  else:
+                     logging.info("Error occurred during metric processing:")
+                     logging.info(metricJson["error"])
+               elif(metricJson == ""):
+                  logging.info("Metric processing resulted in empty string. Validate the transformer module.")
+               else:
+                  # No error received during transformation, continue to publish
+                  logging.debug("Payload to examine: " + str(metricJson))
+                  if 'timestamp' in metricJson["groups"][0]:
+                     # Technically this shouldn't happen...
+                     #logging.info("good metric found: " + json.dumps(metricJson))
+                     for key, value in metricJson["groups"][0]["metrics"].items():
+                        # NaN values are not acceptable in MAD, and will cause an error if trying to publish...
+                        # Normalize metrics if NaN value
+                        #logging.info("Found metric:")
+                        #logging.info(key, 'corresponds to', metricJson["groups"][0]["metrics"][key])
+                        #logging.info(key + ":" + str(value))
+                        if value != value:
+                           logging.debug("NaN value found, setting NaN value to zero")
+                           metricJson["groups"][0]["metrics"][key] = int(0)
+                     #logging.debug("Going to post the following JSON to AIOps: " + json.dumps(metricJson))
+                     publishQueue.put(metricJson)
+                     # Let's track some useful performance metrics...
+                     intervalMetricCount += 1
+                     currTime = int(time.time() * 1000)
+                     deltaTime = currTime - int(metricJson["groups"][0]["timestamp"])
+                     if(deltaTime > longestDelta):
+                        longestDelta = deltaTime
+                     for key in metricJson["groups"][0]["metrics"]:
+                        intervalMetricSet.add(key)
+                     if 'resourceID' in metricJson["groups"][0]:
+                        intervalResourceSet.add(metricJson["groups"][0]["resourceID"])
+                  else:
+                     logging.info("WARNING: Message received contains no timestamp field. Message is: " + json.dumps(metricJson))
                 
             elif msg.error().code() == KafkaError._PARTITION_EOF:
                 logging.info('Kafka error: end of partition reached')
@@ -961,7 +983,7 @@ if 'sourceKafkaDataFormat' in datachannelProps:
       except ImportError:
          print("FATAL: Unable to load required Python package 'avro'. It can be installed using pip as such:\n\tpip install avro\n")
          exit()
-   elif sourceKafkaDataFormat.lower() != "json":
+   elif sourceKafkaDataFormat.lower() != "json" or sourceKafkaDataFormat.lower() != "csv":
       logging.info("Unknown sourceKafkaDataFormat value. Should be set to \"Avro\" or \"JSON\". Defaulting to \"Avro\".")
 else:
    logging.info("sourceKafkaDataFormat not specified in properties file. Setting to \"Avro\".")
