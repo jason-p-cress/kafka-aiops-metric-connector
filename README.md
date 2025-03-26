@@ -44,8 +44,8 @@
 
 <h2>Configuring:</h2>
 
-NOTE: if SevOne is placing metrics in Avro format, you must obtain the SevOne Avro schema from the
-      SevOne Data Bus server. Replace the file 'config/avro-schema.json' with the schema
+NOTE: if metrics are in Avro format, you must obtain the Avro schema from the
+      source generating the metrics. Replace the file 'config/avro-schema.json' with the schema
       obtained from SDB.
 
 The properties file can be found at 'config/kafka-aiops-metric-connector.props'. The following properties
